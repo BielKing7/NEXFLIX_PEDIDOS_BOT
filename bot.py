@@ -1,15 +1,12 @@
 import os
 import html
 import logging
-import requests
+import threading
 
-from telegram import Update, InlineQueryResultArticle, InputTextMessageContent
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    InlineQueryHandler,
-    ContextTypes,
-)
+import requests
+import telebot
+
+from flask import Flask
 
 # ============================================================
 # CONFIGURAÇÃO
@@ -17,27 +14,6 @@ from telegram.ext import (
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 TMDB_TOKEN = os.getenv("TMDB_TOKEN")
-
-TMDB_BASE_URL = "https://api.themoviedb.org/3"
-TMDB_IMAGE_URL = "https://image.tmdb.org/t/p/w500"
-
-LANGUAGE = "pt-BR"
-
-# ============================================================
-# LOG
-# ============================================================
-
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO,
-)
-
-logger = logging.getLogger(__name__)
-
-
-# ============================================================
-# VERIFICAÇÃO DAS CHAVES
-# ============================================================
 
 if not BOT_TOKEN:
     raise RuntimeError("A variável BOT_TOKEN não foi configurada.")
@@ -47,81 +23,126 @@ if not TMDB_TOKEN:
 
 
 # ============================================================
-# CABEÇALHOS TMDB
+# LOG
 # ============================================================
+
+logging.basicConfig(
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    level=logging.INFO
+)
+
+logger = logging.getLogger(__name__)
+
+
+# ============================================================
+# TELEGRAM
+# ============================================================
+
+bot = telebot.TeleBot(
+    BOT_TOKEN,
+    parse_mode="HTML"
+)
+
+
+# ============================================================
+# FLASK
+# ============================================================
+
+app = Flask(__name__)
+
+
+@app.route("/")
+def home():
+    return "NEXFLIX PEDIDOS BOT ONLINE"
+
+
+@app.route("/health")
+def health():
+    return "OK"
+
+
+# ============================================================
+# TMDB
+# ============================================================
+
+TMDB_BASE_URL = "https://api.themoviedb.org/3"
+TMDB_IMAGE_URL = "https://image.tmdb.org/t/p/w500"
 
 TMDB_HEADERS = {
     "Authorization": f"Bearer {TMDB_TOKEN}",
-    "accept": "application/json",
+    "accept": "application/json"
 }
 
 
 # ============================================================
-# COMANDOS
+# COMANDO /START
 # ============================================================
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    mensagem = (
+@bot.message_handler(commands=["start"])
+def start(message):
+
+    texto = (
         "🎬 <b>NEXFLIX</b>\n\n"
-        "🔎 Pesquise filmes e séries usando o modo inline.\n\n"
-        "Exemplos:\n"
-        "🎬 <code>@NEXFLIX_PEDIDOS_BOT filme Batman</code>\n"
-        "📺 <code>@NEXFLIX_PEDIDOS_BOT serie Stranger Things</code>\n\n"
-        "Você também pode usar:\n"
-        "🎬 <code>@NEXFLIX_PEDIDOS_BOT filme Homem-Aranha</code>\n"
-        "📺 <code>@NEXFLIX_PEDIDOS_BOT série The Walking Dead</code>"
+        "🔎 Este bot permite pesquisar filmes e séries "
+        "diretamente pelo Telegram.\n\n"
+        "🎬 <b>Filmes</b>\n"
+        "<code>@NEXFLIX_PEDIDOS_BOT filme Batman</code>\n\n"
+        "📺 <b>Séries</b>\n"
+        "<code>@NEXFLIX_PEDIDOS_BOT serie Stranger Things</code>"
     )
 
-    await update.message.reply_text(
-        mensagem,
-        parse_mode="HTML",
+    bot.send_message(
+        message.chat.id,
+        texto
     )
 
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    mensagem = (
+# ============================================================
+# COMANDO /HELP
+# ============================================================
+
+@bot.message_handler(commands=["help"])
+def help_command(message):
+
+    texto = (
         "📚 <b>Como pesquisar</b>\n\n"
         "🎬 Filmes:\n"
-        "<code>@NEXFLIX_PEDIDOS_BOT filme nome do filme</code>\n\n"
+        "<code>@NEXFLIX_PEDIDOS_BOT filme Batman</code>\n\n"
         "📺 Séries:\n"
-        "<code>@NEXFLIX_PEDIDOS_BOT serie nome da série</code>"
+        "<code>@NEXFLIX_PEDIDOS_BOT serie Stranger Things</code>"
     )
 
-    await update.message.reply_text(
-        mensagem,
-        parse_mode="HTML",
+    bot.send_message(
+        message.chat.id,
+        texto
     )
 
 
 # ============================================================
-# PESQUISA NO TMDB
+# PESQUISAR TMDB
 # ============================================================
 
 def pesquisar_tmdb(tipo, consulta):
-    """
-    tipo:
-        movie = filme
-        tv = série
-    """
 
-    if tipo not in ("movie", "tv"):
+    if tipo not in ["movie", "tv"]:
         return []
 
     url = f"{TMDB_BASE_URL}/search/{tipo}"
 
-    params = {
+    parametros = {
         "query": consulta,
-        "language": LANGUAGE,
+        "language": "pt-BR",
         "include_adult": "false",
-        "page": 1,
+        "page": 1
     }
 
     try:
+
         resposta = requests.get(
             url,
             headers=TMDB_HEADERS,
-            params=params,
-            timeout=15,
+            params=parametros,
+            timeout=15
         )
 
         resposta.raise_for_status()
@@ -131,19 +152,28 @@ def pesquisar_tmdb(tipo, consulta):
         return dados.get("results", [])
 
     except requests.RequestException as erro:
-        logger.error(f"Erro ao consultar TMDB: {erro}")
+
+        logger.error(
+            f"Erro ao consultar TMDB: {erro}"
+        )
+
         return []
 
     except Exception as erro:
-        logger.error(f"Erro inesperado no TMDB: {erro}")
+
+        logger.error(
+            f"Erro inesperado: {erro}"
+        )
+
         return []
 
 
 # ============================================================
-# FORMATAÇÃO
+# INFORMAÇÕES
 # ============================================================
 
 def obter_titulo(item, tipo):
+
     if tipo == "movie":
         return item.get("title") or "Sem título"
 
@@ -151,6 +181,7 @@ def obter_titulo(item, tipo):
 
 
 def obter_data(item, tipo):
+
     if tipo == "movie":
         return item.get("release_date") or ""
 
@@ -158,6 +189,7 @@ def obter_data(item, tipo):
 
 
 def obter_ano(item, tipo):
+
     data = obter_data(item, tipo)
 
     if data and len(data) >= 4:
@@ -166,7 +198,21 @@ def obter_ano(item, tipo):
     return "N/A"
 
 
+def obter_nota(item):
+
+    nota = item.get("vote_average")
+
+    if nota is None:
+        return "N/A"
+
+    try:
+        return f"{float(nota):.1f}"
+    except:
+        return "N/A"
+
+
 def obter_descricao(item):
+
     descricao = item.get("overview")
 
     if not descricao:
@@ -175,25 +221,14 @@ def obter_descricao(item):
     return descricao
 
 
-def obter_nota(item):
-    nota = item.get("vote_average")
-
-    if nota is None:
-        return "N/A"
-
-    try:
-        return f"{float(nota):.1f}"
-    except Exception:
-        return "N/A"
-
-
 def obter_poster(item):
-    poster_path = item.get("poster_path")
 
-    if not poster_path:
+    poster = item.get("poster_path")
+
+    if not poster:
         return None
 
-    return TMDB_IMAGE_URL + poster_path
+    return TMDB_IMAGE_URL + poster
 
 
 # ============================================================
@@ -201,9 +236,19 @@ def obter_poster(item):
 # ============================================================
 
 def criar_mensagem(item, tipo):
-    titulo = html.escape(obter_titulo(item, tipo))
-    ano = html.escape(obter_ano(item, tipo))
-    descricao = html.escape(obter_descricao(item))
+
+    titulo = html.escape(
+        obter_titulo(item, tipo)
+    )
+
+    ano = html.escape(
+        obter_ano(item, tipo)
+    )
+
+    descricao = html.escape(
+        obter_descricao(item)
+    )
+
     nota = obter_nota(item)
 
     if tipo == "movie":
@@ -211,7 +256,7 @@ def criar_mensagem(item, tipo):
     else:
         categoria = "📺 SÉRIE"
 
-    mensagem = (
+    texto = (
         f"<b>{categoria}</b>\n\n"
         f"🎞️ <b>{titulo}</b>\n"
         f"📅 Ano: <b>{ano}</b>\n"
@@ -220,34 +265,62 @@ def criar_mensagem(item, tipo):
         f"{descricao}"
     )
 
-    return mensagem
+    return texto
 
 
 # ============================================================
 # INLINE MODE
 # ============================================================
 
-async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
+@bot.inline_handler(
+    lambda query: True
+)
+def inline_query(query):
 
-    query = update.inline_query.query.strip()
+    texto_pesquisa = query.query.strip()
 
     # --------------------------------------------------------
-    # SE NÃO DIGITOU NADA
+    # PESQUISA VAZIA
     # --------------------------------------------------------
 
-    if not query:
-        await update.inline_query.answer(
-            results=[],
-            cache_time=1,
-            is_personal=True,
+    if not texto_pesquisa:
+
+        resultado = telebot.types.InlineQueryResultArticle(
+            id="ajuda",
+
+            title="🔎 Pesquisar no NEXFLIX",
+
+            description=(
+                "Use: filme nome ou serie nome"
+            ),
+
+            input_message_content=(
+                telebot.types.InputTextMessageContent(
+                    message_text=(
+                        "🎬 <b>NEXFLIX</b>\n\n"
+                        "Use uma das opções abaixo:\n\n"
+                        "🎬 <code>filme Batman</code>\n"
+                        "📺 <code>serie Stranger Things</code>"
+                    ),
+                    parse_mode="HTML"
+                )
+            )
         )
+
+        bot.answer_inline_query(
+            query.id,
+            [resultado],
+            cache_time=1,
+            is_personal=True
+        )
+
         return
 
-    query_lower = query.lower()
+    # --------------------------------------------------------
+    # IDENTIFICAR TIPO
+    # --------------------------------------------------------
 
-    # --------------------------------------------------------
-    # IDENTIFICA FILME OU SÉRIE
-    # --------------------------------------------------------
+    pesquisa_lower = texto_pesquisa.lower()
 
     tipo = None
     pesquisa = ""
@@ -255,7 +328,7 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     comandos_filme = [
         "filme ",
         "filmes ",
-        "movie ",
+        "movie "
     ]
 
     comandos_serie = [
@@ -263,20 +336,33 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "série ",
         "series ",
         "séries ",
-        "tv ",
+        "tv "
     ]
 
     for comando in comandos_filme:
-        if query_lower.startswith(comando):
+
+        if pesquisa_lower.startswith(comando):
+
             tipo = "movie"
-            pesquisa = query[len(comando):].strip()
+
+            pesquisa = texto_pesquisa[
+                len(comando):
+            ].strip()
+
             break
 
     if tipo is None:
+
         for comando in comandos_serie:
-            if query_lower.startswith(comando):
+
+            if pesquisa_lower.startswith(comando):
+
                 tipo = "tv"
-                pesquisa = query[len(comando):].strip()
+
+                pesquisa = texto_pesquisa[
+                    len(comando):
+                ].strip()
+
                 break
 
     # --------------------------------------------------------
@@ -284,27 +370,37 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # --------------------------------------------------------
 
     if tipo is None:
-        resultado = InlineQueryResultArticle(
-            id="ajuda",
-            title="🔎 Como pesquisar",
-            description="Use: filme nome ou serie nome",
-            input_message_content=InputTextMessageContent(
-                message_text=(
-                    "🔎 <b>NEXFLIX</b>\n\n"
-                    "Para pesquisar filmes:\n"
-                    "<code>@NEXFLIX_PEDIDOS_BOT filme Batman</code>\n\n"
-                    "Para pesquisar séries:\n"
-                    "<code>@NEXFLIX_PEDIDOS_BOT serie Stranger Things</code>"
-                ),
-                parse_mode="HTML",
+
+        resultado = telebot.types.InlineQueryResultArticle(
+            id="modo_pesquisa",
+
+            title="🎬 Escolha filmes ou séries",
+
+            description=(
+                "Digite filme ou serie antes da pesquisa"
             ),
+
+            input_message_content=(
+                telebot.types.InputTextMessageContent(
+                    message_text=(
+                        "🔎 <b>NEXFLIX</b>\n\n"
+                        "🎬 Para filmes:\n"
+                        "<code>filme Batman</code>\n\n"
+                        "📺 Para séries:\n"
+                        "<code>serie Stranger Things</code>"
+                    ),
+                    parse_mode="HTML"
+                )
+            )
         )
 
-        await update.inline_query.answer(
-            results=[resultado],
+        bot.answer_inline_query(
+            query.id,
+            [resultado],
             cache_time=1,
-            is_personal=True,
+            is_personal=True
         )
+
         return
 
     # --------------------------------------------------------
@@ -312,23 +408,32 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # --------------------------------------------------------
 
     if not pesquisa:
-        await update.inline_query.answer(
-            results=[],
+
+        bot.answer_inline_query(
+            query.id,
+            [],
             cache_time=1,
-            is_personal=True,
+            is_personal=True
         )
+
         return
 
     # --------------------------------------------------------
-    # PESQUISA TMDB
+    # CONSULTAR TMDB
     # --------------------------------------------------------
 
-    resultados_tmdb = pesquisar_tmdb(tipo, pesquisa)
+    resultados_tmdb = pesquisar_tmdb(
+        tipo,
+        pesquisa
+    )
+
+    resultados_tmdb = resultados_tmdb[:10]
 
     resultados = []
 
-    # Limita aos 10 primeiros
-    resultados_tmdb = resultados_tmdb[:10]
+    # --------------------------------------------------------
+    # CRIAR RESULTADOS
+    # --------------------------------------------------------
 
     for item in resultados_tmdb:
 
@@ -337,123 +442,191 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not tmdb_id:
             continue
 
-        titulo = obter_titulo(item, tipo)
-        ano = obter_ano(item, tipo)
-        nota = obter_nota(item)
-        descricao = obter_descricao(item)
-        poster = obter_poster(item)
+        titulo = obter_titulo(
+            item,
+            tipo
+        )
 
-        mensagem = criar_mensagem(item, tipo)
+        ano = obter_ano(
+            item,
+            tipo
+        )
 
-        # ----------------------------------------------------
-        # TÍTULO DO RESULTADO
-        # ----------------------------------------------------
+        nota = obter_nota(
+            item
+        )
+
+        descricao = obter_descricao(
+            item
+        )
+
+        poster = obter_poster(
+            item
+        )
+
+        mensagem = criar_mensagem(
+            item,
+            tipo
+        )
 
         if tipo == "movie":
+
             emoji = "🎬"
             categoria = "Filme"
+
         else:
+
             emoji = "📺"
             categoria = "Série"
 
-        titulo_resultado = f"{emoji} {titulo}"
+        titulo_resultado = (
+            f"{emoji} {titulo}"
+        )
 
         if ano != "N/A":
-            titulo_resultado += f" ({ano})"
 
-        # ----------------------------------------------------
-        # DESCRIÇÃO CURTA
-        # ----------------------------------------------------
+            titulo_resultado += (
+                f" ({ano})"
+            )
 
-        descricao_resultado = descricao.replace("\n", " ").strip()
+        descricao_curta = (
+            descricao
+            .replace("\n", " ")
+            .strip()
+        )
 
-        if len(descricao_resultado) > 180:
-            descricao_resultado = descricao_resultado[:177] + "..."
+        if len(descricao_curta) > 160:
+
+            descricao_curta = (
+                descricao_curta[:157]
+                + "..."
+            )
 
         descricao_resultado = (
-            f"{categoria} • ⭐ {nota} • {descricao_resultado}"
+            f"{categoria} • "
+            f"⭐ {nota} • "
+            f"{descricao_curta}"
         )
 
         # ----------------------------------------------------
-        # RESULTADO INLINE
+        # COM IMAGEM
         # ----------------------------------------------------
 
-        resultado = InlineQueryResultArticle(
-            id=f"{tipo}_{tmdb_id}",
-            title=titulo_resultado,
-            description=descricao_resultado,
-            thumbnail_url=poster,
-            input_message_content=InputTextMessageContent(
-                message_text=mensagem,
-                parse_mode="HTML",
-            ),
+        if poster:
+
+            resultado = (
+                telebot.types.InlineQueryResultPhoto(
+
+                    id=f"{tipo}_{tmdb_id}",
+
+                    photo_url=poster,
+
+                    thumbnail_url=poster,
+
+                    title=titulo_resultado,
+
+                    description=descricao_resultado,
+
+                    caption=mensagem,
+
+                    parse_mode="HTML"
+                )
+            )
+
+        # ----------------------------------------------------
+        # SEM IMAGEM
+        # ----------------------------------------------------
+
+        else:
+
+            resultado = (
+                telebot.types.InlineQueryResultArticle(
+
+                    id=f"{tipo}_{tmdb_id}",
+
+                    title=titulo_resultado,
+
+                    description=descricao_resultado,
+
+                    input_message_content=(
+                        telebot.types.InputTextMessageContent(
+                            message_text=mensagem,
+                            parse_mode="HTML"
+                        )
+                    )
+                )
+            )
+
+        resultados.append(
+            resultado
         )
 
-        resultados.append(resultado)
-
     # --------------------------------------------------------
-    # ENVIA RESULTADOS
+    # RESPONDER
     # --------------------------------------------------------
 
-    await update.inline_query.answer(
-        results=resultados,
+    bot.answer_inline_query(
+        query.id,
+        resultados,
         cache_time=10,
-        is_personal=True,
+        is_personal=True
     )
 
 
 # ============================================================
-# TRATAMENTO DE ERROS
+# THREAD DO BOT
 # ============================================================
 
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
-    logger.error(
-        "Erro durante execução do bot:",
-        exc_info=context.error,
+def iniciar_bot():
+
+    logger.info(
+        "Iniciando polling do Telegram..."
     )
+
+    while True:
+
+        try:
+
+            bot.infinity_polling(
+                timeout=30,
+                long_polling_timeout=30,
+                skip_pending=True
+            )
+
+        except Exception as erro:
+
+            logger.error(
+                f"Polling interrompido: {erro}"
+            )
 
 
 # ============================================================
 # INICIALIZAÇÃO
 # ============================================================
 
-def main():
-
-    logger.info("Iniciando NEXFLIX_PEDIDOS_BOT...")
-
-    application = (
-        Application.builder()
-        .token(BOT_TOKEN)
-        .build()
-    )
-
-    # Comandos
-    application.add_handler(
-        CommandHandler("start", start)
-    )
-
-    application.add_handler(
-        CommandHandler("help", help_command)
-    )
-
-    # Inline Mode
-    application.add_handler(
-        InlineQueryHandler(inline_query)
-    )
-
-    # Erros
-    application.add_error_handler(error_handler)
-
-    logger.info("NEXFLIX_PEDIDOS_BOT iniciado!")
-
-    application.run_polling(
-        allowed_updates=Update.ALL_TYPES
-    )
-
-
-# ============================================================
-# EXECUTAR
-# ============================================================
-
 if __name__ == "__main__":
-    main()
+
+    # Inicia o Telegram em segundo plano
+    thread_bot = threading.Thread(
+        target=iniciar_bot,
+        daemon=True
+    )
+
+    thread_bot.start()
+
+    # Porta fornecida pelo Render
+    port = int(
+        os.environ.get(
+            "PORT",
+            10000
+        )
+    )
+
+    logger.info(
+        f"Servidor iniciado na porta {port}"
+    )
+
+    app.run(
+        host="0.0.0.0",
+        port=port
+    )
