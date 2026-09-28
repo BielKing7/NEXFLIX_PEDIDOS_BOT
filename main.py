@@ -51,8 +51,8 @@ def start(message):
     markup = telebot.types.InlineKeyboardMarkup()
 
     botao = telebot.types.InlineKeyboardButton(
-        text="🔎 Procurar Filme ou Série",
-        switch_inline_query_current_chat=""
+    text="🔎 Procurar Filme ou Série",
+    switch_inline_query_current_chat=" "
     )
 
     markup.add(botao)
