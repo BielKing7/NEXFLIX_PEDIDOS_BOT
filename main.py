@@ -15,7 +15,7 @@ def run():
     app.run(host='0.0.0.0', port=port)
 
 TOKEN = '8080775586:AAEn6uXjgjS2qgNbhke2Jg8bTTbopOzHldU'
-TMDB_KEY = 'a169d710b2eca204f9db290256828d05'
+TMDB_KEY = 'e658d79f2ae52b132ce2a254838472d5'
 BASE_EMBED = "https://embedplayapi.site/embed/"
 IMG_URL = "https://image.tmdb.org/t/p/w1280"
 
