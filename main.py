@@ -1,205 +1,260 @@
+import os
 import telebot
 import requests
+import time
+from telebot import types
 from flask import Flask
 from threading import Thread
-import os
 
-# =========================================================
-# CONFIGURAÇÕES
-# =========================================================
+# --- SERVIDOR WEB ---
+app = Flask('')
 
-TOKEN = "8080775586:AAGrc4A4y27BprEcnmBV9_sor-xYF9tqIbA"
+@app.route('/')
+def home():
+    return "Servidor Cloud Filmes Online"
 
-TMDB_KEY = "a169d710b2eca204f9db290256828d05"
+def run():
+    port = int(os.environ.get('PORT', 8080))
+    app.run(host='0.0.0.0', port=port)
+
+
+# --- CONFIGURAÇÃO ---
+
+TOKEN = '8080775586:AAEJWOiP3ecgGvrw4ITYJsl_hd57ZCQ4o1E'
+
+TMDB_KEY = 'a169d710b2eca204f9db290256828d05'
 
 bot = telebot.TeleBot(TOKEN)
 
 
 # =========================================================
-# SERVIDOR WEB PARA O RENDER
+# COMANDO START
+# FUNCIONA SOMENTE NO CHAT PRIVADO
 # =========================================================
 
-app = Flask(__name__)
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
 
-
-@app.route("/")
-def home():
-    return "NEXFLIX PEDIDOS BOT ONLINE"
-
-
-def run_server():
-    port = int(os.environ.get("PORT", 10000))
-
-    app.run(
-        host="0.0.0.0",
-        port=port
-    )
-
-
-# =========================================================
-# /START
-# SOMENTE CHAT PRIVADO
-# =========================================================
-
-@bot.message_handler(commands=["start"])
-def start(message):
-
-    # Se for grupo ou supergrupo, não responde
-    if message.chat.type != "private":
+    # Ignora grupos e supergrupos
+    if message.chat.type != 'private':
         return
 
-    markup = telebot.types.InlineKeyboardMarkup()
+    markup = types.InlineKeyboardMarkup()
 
-    botao = telebot.types.InlineKeyboardButton(
-    text="🔎 Procurar Filme ou Série",
-    switch_inline_query_current_chat=" "
+    botao_busca = types.InlineKeyboardButton(
+        text="Procurar Filme ou Serie",
+        switch_inline_query_current_chat=""
     )
 
-    markup.add(botao)
+    markup.add(botao_busca)
 
-    texto = (
-        "✨ **Bem-vindo(a) ao NEXFLIX - PEDIDOS!**\n\n"
-        "🍿 Faça seu pedido de filme ou série "
-        "para o aplicativo NEXFLIX.\n\n"
-        "👇 Toque no botão abaixo para procurar."
+    texto_start = (
+        "✨ **Bem-vindo(a) ao CLOUD FILMES - PEDIDOS!**\n\n"
+        "Para fazer um pedido, clique no botão abaixo "
+        "e digite o nome do conteúdo."
     )
 
-    bot.send_message(
-        message.chat.id,
-        texto,
-        parse_mode="Markdown",
-        reply_markup=markup
-    )
+    try:
+        bot.send_message(
+            message.chat.id,
+            texto_start,
+            parse_mode="Markdown",
+            reply_markup=markup
+        )
+
+    except Exception as e:
+        print(f"Erro no Start: {e}")
 
 
 # =========================================================
-# PESQUISA INLINE
+# MODO INLINE
 # =========================================================
 
 @bot.inline_handler(lambda query: len(query.query) > 2)
-def pesquisar(inline_query):
+def query_text(inline_query):
 
     try:
 
-        nome = inline_query.query
+        nome_busca = inline_query.query
 
         url = (
-            "https://api.themoviedb.org/3/search/multi"
+            f"https://api.themoviedb.org/3/search/multi"
             f"?api_key={TMDB_KEY}"
-            f"&query={requests.utils.quote(nome)}"
-            "&language=pt-BR"
-            "&include_adult=false"
+            f"&query={nome_busca}"
+            f"&language=pt-BR"
         )
 
-        resposta = requests.get(
-            url,
-            timeout=15
-        )
+        res = requests.get(url).json()
 
-        dados = resposta.json()
+        resultados = res.get('results', [])[:15]
 
-        resultados = dados.get("results", [])
+        res_inline = []
 
-        resultados = [
-            item
-            for item in resultados
-            if item.get("media_type") in ["movie", "tv"]
-        ]
-
-        resultados = resultados[:15]
-
-        respostas = []
-
-        for indice, item in enumerate(resultados):
+        for i, item in enumerate(resultados):
 
             titulo = (
-                item.get("title")
-                or item.get("name")
-                or "Sem título"
+                item.get('title')
+                or item.get('name')
+                or 'Sem título'
             )
 
             data = (
-                item.get("release_date")
-                or item.get("first_air_date")
-                or ""
+                item.get('release_date')
+                or item.get('first_air_date')
+                or '----'
             )
 
-            ano = data[:4] if data else "----"
+            ano = data[:4]
 
-            if item.get("media_type") == "movie":
-                tipo = "🎬 Filme"
-            else:
-                tipo = "📺 Série"
+            tipo = (
+                "🎬 Filme"
+                if item.get('media_type') == 'movie'
+                else "📺 Série"
+            )
 
-            poster = item.get("poster_path")
+            thumb = (
+                f"https://image.tmdb.org/t/p/w92"
+                f"{item.get('poster_path')}"
+                if item.get('poster_path')
+                else None
+            )
 
-            thumbnail = None
-
-            if poster:
-                thumbnail = (
-                    "https://image.tmdb.org/t/p/w92"
-                    + poster
-                )
-
-            resultado = telebot.types.InlineQueryResultArticle(
-
-                id=str(indice),
+            r = types.InlineQueryResultArticle(
+                id=str(i),
 
                 title=f"{titulo} ({ano})",
 
-                description=f"{tipo} • Toque para solicitar",
+                description=f"{tipo} - Toque para solicitar",
 
-                thumbnail_url=thumbnail,
+                thumbnail_url=thumb,
 
-                input_message_content=
-                telebot.types.InputTextMessageContent(
-
+                input_message_content=types.InputTextMessageContent(
                     message_text=(
                         "🚀 **Solicitação recebida!**\n\n"
-                        f"🍿 *{titulo} ({ano})*\n\n"
-                        "Seu pedido foi registrado."
+                        f"_{titulo} ({ano})_"
                     ),
-
                     parse_mode="Markdown"
                 )
             )
 
-            respostas.append(resultado)
+            res_inline.append(r)
 
         bot.answer_inline_query(
             inline_query.id,
-            respostas,
+            res_inline,
             cache_time=1
         )
 
-    except Exception as erro:
+    except Exception as e:
 
-        print("Erro na pesquisa:", erro)
+        print(f"Erro Inline: {e}")
 
 
 # =========================================================
-# INICIAR
+# PROCESSAMENTO DO PEDIDO
+# SOMENTE NO CHAT PRIVADO
+# =========================================================
+
+@bot.message_handler(
+    func=lambda m:
+        m.chat.type == 'private'
+        and m.text
+        and "Solicitação recebida!" in m.text
+)
+def processar_pedido(message):
+
+    try:
+
+        partes = message.text.split('\n\n')
+
+        if len(partes) < 2:
+            return
+
+        conteudo = partes[-1].strip('_')
+
+        nome_limpo = conteudo.split(' (')[0]
+
+        url = (
+            f"https://api.themoviedb.org/3/search/multi"
+            f"?api_key={TMDB_KEY}"
+            f"&query={nome_limpo}"
+            f"&language=pt-BR"
+        )
+
+        res_tmdb = requests.get(url).json().get(
+            'results',
+            []
+        )
+
+        if res_tmdb:
+
+            detalhes = res_tmdb[0]
+
+            titulo = (
+                detalhes.get('title')
+                or detalhes.get('name')
+            )
+
+            data = (
+                detalhes.get('release_date')
+                or detalhes.get('first_air_date')
+                or '----'
+            )
+
+            ano = data[:4]
+
+            tipo = (
+                "🎬 Filme"
+                if detalhes.get('media_type') == 'movie'
+                else "📺 Série"
+            )
+
+            texto_confirmacao = (
+                "🚀 **Solicitação recebida!**\n\n"
+                f"📂 **Tipo:** {tipo}\n\n"
+                f"📌 **Título:** {titulo}\n\n"
+                f"📅 **Ano:** {ano}\n\n"
+                "Seu pedido foi registrado com sucesso."
+            )
+
+            bot.send_message(
+                message.chat.id,
+                texto_confirmacao,
+                parse_mode="Markdown"
+            )
+
+        # Faxina automática
+        time.sleep(20)
+
+        try:
+            bot.delete_message(
+                message.chat.id,
+                message.message_id
+            )
+        except:
+            pass
+
+    except Exception as e:
+
+        print(f"Erro ao processar: {e}")
+
+
+# =========================================================
+# INICIAR BOT
 # =========================================================
 
 if __name__ == "__main__":
 
-    servidor = Thread(
-        target=run_server,
-        daemon=True
-    )
+    t = Thread(target=run)
 
-    servidor.start()
+    t.start()
 
     bot.remove_webhook()
 
-    print("================================")
-    print("NEXFLIX PEDIDOS BOT ONLINE")
-    print("================================")
-    print("Modo: CHAT PRIVADO")
-    print("Grupos: DESATIVADOS")
+    print("=================================")
+    print("CLOUD FILMES BOT ONLINE")
+    print("MODO: CHAT PRIVADO")
+    print("GRUPOS: DESATIVADOS")
+    print("=================================")
 
-    bot.infinity_polling(
-        skip_pending=True,
-        timeout=30,
-        long_polling_timeout=30
-    )
+    bot.infinity_polling()
