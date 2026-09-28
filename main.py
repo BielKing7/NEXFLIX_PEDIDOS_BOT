@@ -8,7 +8,7 @@ import os
 # CONFIGURAÇÕES
 # =========================================================
 
-TOKEN = "8080775586:AAEAB_my0h0dLqbOfmHeF5aXe6S6YTSKRHU"
+TOKEN = "8080775586:AAGrc4A4y27BprEcnmBV9_sor-xYF9tqIbA"
 
 TMDB_KEY = "a169d710b2eca204f9db290256828d05"
 
